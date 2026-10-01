@@ -302,11 +302,54 @@
                 }
             }
 
+            function deactivateAutoScaleButton() {
+                const engine = chart && chart.engine;
+                if (!engine) return;
+
+                // Disable Auto Scale internally only when manual price zoom starts.
+                disableManualScaleLocks();
+
+                // The A/L/% controls live under the price scale.
+                // Only deactivate the Auto Scale (A) control.
+                const candidates = engine.container
+                    ? engine.container.querySelectorAll('button, [role="button"]')
+                    : [];
+
+                candidates.forEach((el) => {
+                    const label = (
+                        el.getAttribute('aria-label') || '' + ' ' +
+                        el.getAttribute('title') || '' + ' ' +
+                        el.textContent || ''
+                    ).trim();
+
+                    if (label === 'A' || /^Auto\s*Scale$/i.test(label)) {
+                        el.classList.remove('active', 'selected', 'pressed');
+                        el.setAttribute('aria-pressed', 'false');
+                        el.style.color = '#000';
+                    }
+                });
+            }
+
+            function deactivateAutoScaleFromPriceScaleWheel(event) {
+                const target = event.target;
+                if (!target || !target.closest) return;
+
+                const priceScale = target.closest(
+                    '[class*="price-scale"], [class*="priceScale"], ' +
+                    '[class*="price-axis"], [class*="priceAxis"], ' +
+                    '[data-price-scale], [data-price-axis]'
+                );
+
+                if (priceScale) {
+                    deactivateAutoScaleButton();
+                }
+            }
+
             function verticalZoom(factor) {
                 const engine = chart && chart.engine;
                 if (!engine) return;
 
-                disableManualScaleLocks();
+                deactivateAutoScaleButton();
 
                 const range = engine.priceRange;
                 if (!range) return;
@@ -339,11 +382,17 @@
                 event.preventDefault();
                 event.stopPropagation();
 
-                const factor = event.deltaY < 0 ? 1.15 : (1 / 1.15);
+                // Price-scale wheel = manual scale control, so Auto Scale (A)
+                // becomes inactive immediately. Normal chart wheel remains scroll.
+                deactivateAutoScaleFromPriceScaleWheel(event);
 
                 if (event.ctrlKey) {
+                    // DO NOT CHANGE CTRL-WHEEL BEHAVIOR.
+                    const factor = event.deltaY < 0 ? 1.15 : (1 / 1.15);
                     horizontalZoom(factor);
                 } else {
+                    // Alt + Wheel: up = zoom in, down = zoom out.
+                    const factor = event.deltaY < 0 ? (1 / 1.15) : 1.15;
                     verticalZoom(factor);
                 }
             }
@@ -357,7 +406,6 @@
                 });
                 parent.dataset.tradigyWheelBound = '1';
 
-                disableManualScaleLocks();
                 return true;
             }
 
@@ -372,7 +420,7 @@
                 setTimeout(() => observer.disconnect(), 10000);
             }
 
-            window.addEventListener('resize', disableManualScaleLocks);
+
         })();
 
         console.log('Chart initialized:', chart);
