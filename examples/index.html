@@ -233,6 +233,148 @@
         // Clear all lines
         // chart.clearHorizontalLines();
 
+        // ============================================================
+        // TRADIGY V2 MOUSE WHEEL CONTROLS
+        // Wheel        = existing horizontal scroll
+        // Ctrl + Wheel = horizontal zoom around chart center
+        // Alt + Wheel  = vertical price-scale zoom
+        // Manual wheel zoom overrides A/L auto-scale and scale-lock
+        // ============================================================
+        (function setupTradigyWheelControls() {
+            const parent = document.getElementById('fcs_chartparent');
+
+            function clamp(value, min, max) {
+                return Math.max(min, Math.min(max, value));
+            }
+
+            function disableManualScaleLocks() {
+                const engine = chart && chart.engine;
+                if (!engine) return;
+
+                if (engine.options) {
+                    engine.options.autoScale = false;
+                    engine.options.lockScale = false;
+                    engine.options.priceScaleLock = false;
+                    engine.options.scaleLock = false;
+                }
+
+                const ui = engine.uiManager;
+                if (ui) {
+                    if ('autoScale' in ui) ui.autoScale = false;
+                    if ('lockScale' in ui) ui.lockScale = false;
+                    if ('priceScaleLock' in ui) ui.priceScaleLock = false;
+                    if ('scaleLock' in ui) ui.scaleLock = false;
+                }
+            }
+
+            function horizontalZoom(factor) {
+                const engine = chart && chart.engine;
+                if (!engine) return;
+
+                const oldWidth = Number(engine.candleWidth) || 8;
+                const spacing = Number(engine.candleSpacing) || 0;
+                const newWidth = clamp(oldWidth * factor, 1, 80);
+                if (Math.abs(newWidth - oldWidth) < 0.0001) return;
+
+                const priceAxisWidth = Number(engine.priceAxisWidth) || 0;
+                const chartWidth = Math.max(
+                    1,
+                    Number(engine.width) || parent.clientWidth || 1
+                );
+                const viewportWidth = Math.max(1, chartWidth - priceAxisWidth);
+                const centerX = viewportWidth / 2;
+
+                const oldStep = oldWidth + spacing;
+                const newStep = newWidth + spacing;
+
+                // Keep the candle at the horizontal screen center fixed.
+                const centerIndex =
+                    (Number(engine.scrollOffset) || 0) + centerX / oldStep;
+
+                engine.candleWidth = newWidth;
+                engine.scrollOffset = centerIndex - centerX / newStep;
+
+                if (typeof engine.calculateVisibleRange === 'function') {
+                    engine.calculateVisibleRange();
+                }
+                if (typeof engine.render === 'function') {
+                    engine.render();
+                }
+            }
+
+            function verticalZoom(factor) {
+                const engine = chart && chart.engine;
+                if (!engine) return;
+
+                disableManualScaleLocks();
+
+                const range = engine.priceRange;
+                if (!range) return;
+
+                const min = Number(range.min);
+                const max = Number(range.max);
+                if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
+                    return;
+                }
+
+                const center = (min + max) / 2;
+                const half = (max - min) / 2;
+                const nextHalf = clamp(half * factor, Number.EPSILON, half * 100);
+
+                range.min = center - nextHalf;
+                range.max = center + nextHalf;
+
+                if (typeof engine.render === 'function') {
+                    engine.render();
+                }
+            }
+
+            function onWheel(event) {
+                // Normal wheel remains the existing FCS horizontal scroll.
+                // Ctrl/Alt wheel is owned by Tradigy.
+                if ((event.ctrlKey ? 1 : 0) + (event.altKey ? 1 : 0) !== 1) {
+                    return;
+                }
+
+                event.preventDefault();
+                event.stopPropagation();
+
+                const factor = event.deltaY < 0 ? 1.15 : (1 / 1.15);
+
+                if (event.ctrlKey) {
+                    horizontalZoom(factor);
+                } else {
+                    verticalZoom(factor);
+                }
+            }
+
+            function bindWheel() {
+                if (!parent || parent.dataset.tradigyWheelBound === '1') return true;
+
+                parent.addEventListener('wheel', onWheel, {
+                    passive: false,
+                    capture: true
+                });
+                parent.dataset.tradigyWheelBound = '1';
+
+                disableManualScaleLocks();
+                return true;
+            }
+
+            if (!bindWheel()) {
+                const observer = new MutationObserver(() => {
+                    if (bindWheel()) observer.disconnect();
+                });
+                observer.observe(document.documentElement, {
+                    childList: true,
+                    subtree: true
+                });
+                setTimeout(() => observer.disconnect(), 10000);
+            }
+
+            window.addEventListener('resize', disableManualScaleLocks);
+        })();
+
         console.log('Chart initialized:', chart);
 
         // Debug info after data loads
